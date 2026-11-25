@@ -49,6 +49,15 @@ export const websiteConfigSchema = z.object({
     .max(200, "User agent must be at most 200 characters")
     .regex(/^[\x20-\x7E]+$/, "User agent can contain printable ASCII characters only"),
   includeWwwVariant: z.boolean(),
+  respectRobotsTxt: z.boolean(),
+  hostAliases: z
+    .array(
+      z
+        .string()
+        .toLowerCase()
+        .regex(/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/, "Host aliases are host names such as www.example.com"),
+    )
+    .max(10, "At most 10 host aliases"),
   includePatterns: z.array(urlPatternSchema).max(100, "At most 100 include patterns"),
   excludePatterns: z.array(urlPatternSchema).max(100, "At most 100 exclude patterns"),
   keptQueryParams: z
@@ -75,6 +84,8 @@ export function configFromFormData(form: FormData): Record<string, unknown> {
     retryAttempts: form.get("retryAttempts"),
     userAgent: form.get("userAgent"),
     includeWwwVariant: form.get("includeWwwVariant") === "on",
+    respectRobotsTxt: form.get("respectRobotsTxt") === "on",
+    hostAliases: lines(form.get("hostAliases")).map((h) => h.replace(/^https?:\/\//i, "").replace(/\/.*$/, "")),
     includePatterns: lines(form.get("includePatterns")),
     excludePatterns: lines(form.get("excludePatterns")),
     keptQueryParams: lines(form.get("keptQueryParams")),

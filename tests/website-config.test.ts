@@ -13,6 +13,8 @@ function form(overrides: Record<string, string | string[]> = {}): FormData {
     retryAttempts: "3",
     userAgent: "EdstellarMonitor/1.0 (+https://www.edstellar.com)",
     includeWwwVariant: "on",
+    respectRobotsTxt: "on",
+    hostAliases: "",
     includePatterns: "",
     excludePatterns: "/search*\n/cart/**\n/search*",
     keptQueryParams: "page",
@@ -26,6 +28,20 @@ function form(overrides: Record<string, string | string[]> = {}): FormData {
 }
 
 describe("website configuration validation", () => {
+  it("reads host aliases, stripping schemes and paths, and rejects non-hosts", () => {
+    const ok = websiteConfigSchema.safeParse(
+      configFromFormData(form({ hostAliases: "https://WWW.Edstellar.com/\nedstellar.com", respectRobotsTxt: [] })),
+    );
+    expect(ok.success).toBe(true);
+    if (ok.success) {
+      expect(ok.data.hostAliases).toEqual(["www.edstellar.com", "edstellar.com"]);
+      expect(ok.data.respectRobotsTxt).toBe(false);
+    }
+    const bad = websiteConfigSchema.safeParse(configFromFormData(form({ hostAliases: "not a host" })));
+    expect(bad.success).toBe(false);
+    if (!bad.success) expect(fieldErrors(bad.error).hostAliases).toBeDefined();
+  });
+
   it("accepts the four-hour defaults", () => {
     const parsed = websiteConfigSchema.safeParse(configFromFormData(form()));
     expect(parsed.success).toBe(true);
@@ -34,6 +50,8 @@ describe("website configuration validation", () => {
     expect(parsed.data.requestTimeoutSeconds).toBe(15);
     expect(parsed.data.excludePatterns).toEqual(["/search*", "/cart/**"]);
     expect(parsed.data.includeWwwVariant).toBe(true);
+    expect(parsed.data.respectRobotsTxt).toBe(true);
+    expect(parsed.data.hostAliases).toEqual([]);
     expect(parsed.data.pageSpeedEnabled).toBe(false);
     expect(parsed.data.sslWarningDays).toEqual([30, 15, 7, 3]);
   });

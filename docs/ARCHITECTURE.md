@@ -14,7 +14,7 @@
    calls worker or a secured endpoint            └──────────┘
                 ┌──────────────────────────────┐      ▲
                 │ Monitoring worker (phase 2+)  │──────┘
-                │  plain Node.js, no Next deps  │──▶ https://www.edstellar.com (in-scope hosts only)
+                │  plain Node.js, no Next deps  │──▶ https://edstellar-two.vercel.app (in-scope hosts only)
                 └──────────────────────────────┘
 ```
 
@@ -66,7 +66,22 @@ edstellar-monitor/
 └── docs/
 ```
 
-Planned additions: `src/server/engine/` (crawler, detectors, issue reconciler; phases 2–4), `worker/index.ts` (process entry point; phase 2), `src/app/api/cron/` (secured trigger; phase 5).
+Phase 2 added `src/server/engine/` and `worker/index.ts`:
+
+```
+src/server/engine/
+├── normalize.ts   # URL normalisation (dedupe key for DiscoveredUrl)
+├── scope.ts       # include/exclude globs, host scope, host aliases
+├── robots.ts      # RFC 9309 robots.txt parser
+├── http.ts        # guarded HTTP client: vetted DNS, manual redirects, timeouts, retries, classification
+├── links.ts       # <a>/<area> links and canonical from HTML (htmlparser2)
+├── sitemaps.ts    # urlset / sitemap index / text / gzip, index tree
+├── crawler.ts     # breadth-first crawl with a concurrency limit (no database access)
+└── run.ts         # one monitoring run: lease, jobs, persistence
+worker/index.ts    # CLI entry point: npm run worker -- --website <domain>
+```
+
+Engine modules do not import `server-only` or Next.js, so the worker runs under plain Node.js (via `tsx`). Planned: detectors and the issue reconciler (phases 3–4), `src/app/api/cron/` (secured trigger; phase 5).
 
 ## Data model
 
@@ -91,7 +106,7 @@ Indexes cover the dashboard's access paths (website + status / severity / catego
 - **Throttling.** Postgres-backed: 5 failures per email or 25 per IP hash in 15 minutes. Works across serverless instances.
 - **Roles.** `requireRole` for pages (redirects to a 403 page) and `authorize` for server actions (throws). The UI hides controls, but the server is the enforcement point.
 - **CSRF.** Mutations are Server Actions, which Next.js only accepts from the same origin; the session cookie is `SameSite=Lax`.
-- **SSRF.** `src/server/security/url-guard.ts` allows only http(s) on ports 80/443, no credentials in URLs, no IP literals, no internal names (`localhost`, `*.internal`, single-label hosts…). DNS answers are resolved and refused if *any* address is private, loopback, link-local (incl. `169.254.169.254`), CGNAT, multicast, reserved, or an IPv4-mapped form of these. Crawl scope is the domain and its `www` variant only. The crawler (phase 2) must re-run these checks on every redirect hop and connect to the vetted address.
+- **SSRF.** `src/server/security/url-guard.ts` allows only http(s) on ports 80/443, no credentials in URLs, no IP literals, no internal names (`localhost`, `*.internal`, single-label hosts…). DNS answers are resolved and refused if *any* address is private, loopback, link-local (incl. `169.254.169.254`), CGNAT, multicast, reserved, or an IPv4-mapped form of these. Crawl scope is the domain and its `www` variant only. The crawler re-runs `parsePublicUrl` on every redirect hop and resolves DNS through a guarded `lookup` that refuses the host if any address is private, so the socket connects only to a vetted address.
 - **Secrets.** API credentials and Slack webhooks are stored as AES-256-GCM ciphertext (`ENCRYPTION_KEY`) and never sent to the browser. IP addresses are stored only as keyed hashes.
 - **Headers.** CSP, `X-Frame-Options: DENY`, HSTS, `nosniff`, strict referrer policy.
 - **Validation.** Zod schemas on every server action; Prisma parameterises all queries, including the tagged-template raw SQL used for charts.

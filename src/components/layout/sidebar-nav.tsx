@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV_GROUPS, isActivePath } from "@/lib/navigation";
+import { BUILT_PHASE, NAV_GROUPS, isActivePath } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
@@ -30,7 +30,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                   >
                     <Icon className={cn("size-4 shrink-0", active ? "text-rail-accent" : "text-rail-muted")} />
                     <span className="flex-1 truncate">{item.label}</span>
-                    {item.phase > 1 && (
+                    {item.phase > BUILT_PHASE && (
                       <span className="text-[11px] text-rail-muted" title={`Arrives in build phase ${item.phase}`}>
                         P{item.phase}
                       </span>

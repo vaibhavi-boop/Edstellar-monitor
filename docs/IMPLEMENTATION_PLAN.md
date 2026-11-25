@@ -6,13 +6,15 @@ Each phase ends with: unit tests, a type check, a production build, browser chec
 
 Project setup; Prisma schema for every phase and the initial migration; authentication with roles, throttling and session revocation; dashboard shell (sidebar, top bar, website switcher, light/dark/system theme, responsive layout); website management and the full configuration form from spec section 22; user management; activity log; overview wired to real queries with empty states; health score; SSRF guard; secret encryption; health endpoint. See `PHASE1_VERIFICATION.md`.
 
-## Phase 2 — discovery and availability
+## Phase 2 — discovery and availability ✅
+
+Built as planned in `src/server/engine/` (normalise, scope, robots, http, links, sitemaps, crawler, run) and `worker/index.ts`. Additions: host aliases (`WebsiteConfiguration.hostAliases`, migration `host_aliases`) and an editable *Respect robots.txt* setting, both needed to monitor the Vercel staging deployment. A basic run lease is in place; resuming an interrupted run from its cursor stays in phase 5. See `PHASE2_VERIFICATION.md`.
 
 - `src/server/engine/`: URL normaliser (lower-case host, strip fragment and default port, trailing-slash rule, drop query params not in `keptQueryParams`, sort the rest), scope check, include/exclude glob matcher, robots.txt parser (respecting the configured user agent).
 - Sitemap reader: `robots.txt` declarations + `/sitemap.xml`, sitemap indexes, gzip, URL counts per file → `Sitemap`.
 - Crawler: breadth-first by depth, `maxUrls`, concurrency limit, timeouts, retries with exponential backoff and jitter, honouring `Retry-After` on 429/503. Manual redirect following with the URL guard re-applied on every hop.
 - Availability classification into `Availability` (UP, REDIRECT, CLIENT_ERROR, SERVER_ERROR, TIMEOUT, DNS_ERROR, SSL_ERROR, CONNECTION_ERROR, BLOCKED), with `expectedResponses` exceptions so expected 401/403/redirects are not errors.
-- `worker/index.ts` + `npm run worker -- --website edstellar.com` for a manual full or incremental scan.
+- `worker/index.ts` + `npm run worker -- --website edstellar-two.vercel.app` for a manual full or incremental scan.
 - Screens: Pages (inventory with search, filters, pagination, manual URL add), Sitemap.
 
 ## Phase 3 — findings

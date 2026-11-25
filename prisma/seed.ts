@@ -42,12 +42,26 @@ async function main() {
       url: EDSTELLAR_WEBSITE.url,
       domain: EDSTELLAR_WEBSITE.domain,
       createdById: adminId,
-      configuration: { create: { crawlFrequencyMinutes: 240, userAgent: DEFAULT_USER_AGENT } },
+      configuration: {
+        create: {
+          crawlFrequencyMinutes: 240,
+          userAgent: DEFAULT_USER_AGENT,
+          respectRobotsTxt: EDSTELLAR_WEBSITE.respectRobotsTxt,
+          hostAliases: [...EDSTELLAR_WEBSITE.hostAliases],
+        },
+      },
     },
     include: { configuration: true },
   });
   if (!website.configuration) {
-    await db.websiteConfiguration.create({ data: { websiteId: website.id, userAgent: DEFAULT_USER_AGENT } });
+    await db.websiteConfiguration.create({
+      data: {
+        websiteId: website.id,
+        userAgent: DEFAULT_USER_AGENT,
+        respectRobotsTxt: EDSTELLAR_WEBSITE.respectRobotsTxt,
+        hostAliases: [...EDSTELLAR_WEBSITE.hostAliases],
+      },
+    });
   }
   console.log(`Website ready: ${website.name} (${website.url}), checked every 4 hours.`);
 }

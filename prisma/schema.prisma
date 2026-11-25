@@ -240,6 +240,9 @@ model WebsiteConfiguration {
   userAgent             String   @default("EdstellarMonitor/1.0 (+https://www.edstellar.com)")
   respectRobotsTxt      Boolean  @default(true)
   includeWwwVariant     Boolean  @default(true)
+  /// Other hosts whose URLs count as this website (e.g. the production domain
+  /// named in a staging deployment's sitemap). Mapped onto the website's origin.
+  hostAliases           String[] @default([])
   includePatterns       String[] @default([])
   excludePatterns       String[] @default([])
   ignoredIssueTypes     String[] @default([])

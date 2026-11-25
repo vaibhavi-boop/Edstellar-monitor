@@ -120,7 +120,10 @@ export default async function OverviewPage() {
                 <LocalTime value={data.lastRun.finishedAt ?? data.lastRun.startedAt} mode="relative" />
               </span>
             ) : (
-              <span>No monitoring run has completed yet. Crawling and checks are added in build phase 2.</span>
+              <span>
+                No monitoring run yet. Start one with{" "}
+                <code className="font-mono text-xs">npm run worker -- --website {active.domain}</code>; the four-hour schedule arrives in build phase 5.
+              </span>
             )}
           </div>
         </Card>

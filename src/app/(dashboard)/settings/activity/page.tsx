@@ -25,6 +25,7 @@ const ACTION_LABELS: Record<string, string> = {
   "website.paused": "Paused monitoring",
   "website.resumed": "Resumed monitoring",
   "website.deleted": "Deleted a website",
+  "url.added_manually": "Added a URL manually",
 };
 
 function detail(metadata: unknown): string {
@@ -34,6 +35,7 @@ function detail(metadata: unknown): string {
   if (typeof m.email === "string") return `${m.email}${typeof m.role === "string" ? `, ${m.role.toLowerCase()}` : ""}`;
   if (typeof m.from === "string" && typeof m.to === "string") return `${m.from.toLowerCase()} to ${m.to.toLowerCase()}`;
   if (typeof m.domain === "string") return m.domain;
+  if (typeof m.url === "string") return m.url;
   return "";
 }
 

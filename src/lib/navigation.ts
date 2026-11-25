@@ -17,11 +17,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+/** The latest build phase that is complete. */
+export const BUILT_PHASE = 2;
+
 export interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
-  /** The build phase that delivers this screen. 1 = available now. */
+  /** The build phase that delivers this screen. Screens with phase <= BUILT_PHASE are available. */
   phase: number;
   description: string;
 }

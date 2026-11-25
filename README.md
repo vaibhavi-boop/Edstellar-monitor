@@ -1,8 +1,8 @@
 # Edstellar Monitor
 
-Website health monitoring for **https://www.edstellar.com**: URL discovery, availability, broken links, SEO, redirects, APIs, SSL and performance, checked every four hours, with a full issue history.
+Website health monitoring for Edstellar, currently pointed at the Vercel deployment **https://edstellar-two.vercel.app**: URL discovery, availability, broken links, SEO, redirects, APIs, SSL and performance, checked every four hours, with a full issue history.
 
-This repository is being built in six phases (see `docs/IMPLEMENTATION_PLAN.md`). **Phase 1 is complete**: project setup, authentication and roles, the complete database schema with its migration, the dashboard shell, and website configuration. Screens for later phases are in the navigation but clearly marked with the phase that delivers them; they show no sample data.
+This repository is being built in six phases (see `docs/IMPLEMENTATION_PLAN.md`). **Phases 1 and 2 are complete**: project setup, authentication and roles, the complete database schema, the dashboard shell and website configuration (phase 1); robots.txt and sitemap reading, a crawler with availability checks, the monitoring worker, and the Pages and Sitemap screens (phase 2). Screens for later phases are in the navigation but clearly marked with the phase that delivers them; they show no sample data.
 
 ## Stack
 
@@ -24,6 +24,7 @@ cp .env.example .env             # then fill in the values (see below)
 npm run db:deploy                # applies prisma/migrations
 npm run db:seed                  # creates the first admin and the Edstellar website
 npm run dev                      # http://localhost:3000
+npm run worker -- --website edstellar-two.vercel.app   # first scan
 ```
 
 Sign in with `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`, then remove `SEED_ADMIN_PASSWORD` from your environment. Change the password under **Settings → Account**.
@@ -52,18 +53,36 @@ All variables are documented in `.env.example`. Phase 1 needs:
 |---|---|
 | `npm run dev` / `build` / `start` | Next.js |
 | `npm run lint` | TypeScript type check |
-| `npm test` | Unit tests (63 tests) |
+| `npm test` | Unit and crawler tests (91 tests) |
+| `npm run worker -- --website <domain>` | Run one monitoring scan (see below) |
 | `npm run db:migrate` | Create a new migration after editing the schema (development) |
 | `npm run db:deploy` | Apply committed migrations (CI / production) |
 | `npm run db:seed` | Idempotent seed |
 | `npm run db:studio` | Prisma Studio |
+
+## Running a scan
+
+The dashboard never crawls; the worker does, as a separate plain Node.js process that shares the database:
+
+```bash
+npm run worker -- --website edstellar-two.vercel.app                    # full scan
+npm run worker -- --website edstellar-two.vercel.app --scan incremental # re-check known URLs only
+npm run worker -- --website edstellar-two.vercel.app --max-urls 50      # quick trial
+npm run worker -- --help
+```
+
+A **full** scan reads robots.txt and every sitemap, then crawls breadth-first from the home page, the sitemap URLs and any manually added URLs, following links up to the configured depth and maximum URL count. An **incremental** scan reads the sitemaps and re-checks every known URL without following links. Each URL gets a status code, an availability class (up, redirect, client error, server error, timeout, DNS, SSL, connection error, blocked) and a response time; results appear under **Pages** and **Sitemap**.
+
+Only one run per website can be active (a lease in `MonitoringLock`, renewed every 30 s; a crashed run's lease expires after 5 minutes). Ctrl+C stops after the requests in flight and records the run as cancelled. Scheduling every four hours arrives in phase 5.
+
+**Staging deployments.** `edstellar-two.vercel.app` blocks every crawler in robots.txt and its sitemap lists `www.edstellar.com` URLs. Its configuration therefore has *Respect robots.txt* turned off and `www.edstellar.com` / `edstellar.com` as **host aliases**, so sitemap and link URLs on those hosts are checked as the same paths on the deployment. Both settings are under **Websites → (website) → Crawl scope**.
 
 ## Roles
 
 | Role | Can |
 |---|---|
 | Administrator | Add, edit, pause and delete websites; change monitoring settings; manage users; read the activity log |
-| Editor | Everything a viewer can; issue status changes and manual runs arrive in phases 3 and 5 |
+| Editor | Everything a viewer can, plus adding URLs manually under Pages; issue status changes and run-now arrive in phases 3 and 5 |
 | Viewer | Read dashboards and settings |
 
 ## Documentation
@@ -71,3 +90,4 @@ All variables are documented in `.env.example`. Phase 1 needs:
 - `docs/ARCHITECTURE.md` — architecture, folder structure, data model, security
 - `docs/IMPLEMENTATION_PLAN.md` — the six phases and the free-tier hosting plan
 - `docs/PHASE1_VERIFICATION.md` — what was tested for phase 1 and how
+- `docs/PHASE2_VERIFICATION.md` — what was tested for phase 2 and how

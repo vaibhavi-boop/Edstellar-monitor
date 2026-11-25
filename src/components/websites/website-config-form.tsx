@@ -62,7 +62,7 @@ export function WebsiteConfigForm({
           </Field>
         </Section>
 
-        <Section title="Crawl scope" description={`Only ${domain} and www.${domain} are crawled. robots.txt is always respected.`}>
+        <Section title="Crawl scope" description={`Only ${domain}${config.includeWwwVariant ? ` and www.${domain}` : ""} are crawled, plus any host aliases mapped onto it.`}>
           <Field id="crawlDepth" label="Crawl depth" hint="Link hops from the home page and sitemap URLs (1–50)" errors={e.crawlDepth}>
             <Input {...describe("crawlDepth", state)} type="number" min={1} max={50} defaultValue={config.crawlDepth} />
           </Field>
@@ -93,6 +93,23 @@ export function WebsiteConfigForm({
             <span>
               Treat www.{domain} as the same site
               <span className="block text-[13px] text-muted-foreground">Recommended. Other subdomains stay out of scope.</span>
+            </span>
+          </label>
+          <Field
+            id="hostAliases"
+            label="Host aliases"
+            hint={`One host per line. Links and sitemap URLs on these hosts are checked as the same path on ${domain}. Use the production domain when monitoring a staging deployment.`}
+            errors={e.hostAliases}
+          >
+            <Textarea {...describe("hostAliases", state)} defaultValue={config.hostAliases.join("\n")} className="min-h-20" spellCheck={false} placeholder="www.example.com" />
+          </Field>
+          <label className="flex items-start gap-2.5 self-start pt-7 text-sm">
+            <Checkbox name="respectRobotsTxt" defaultChecked={config.respectRobotsTxt} className="mt-0.5" />
+            <span>
+              Respect robots.txt
+              <span className="block text-[13px] text-muted-foreground">
+                Recommended for live sites. Turn off for a staging deployment whose robots.txt blocks every crawler.
+              </span>
             </span>
           </label>
         </Section>
