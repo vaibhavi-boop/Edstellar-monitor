@@ -23,6 +23,8 @@ jobs:
       ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       SEED_ADMIN_EMAIL: ci@example.com
       SEED_ADMIN_PASSWORD: ci-password-1234
+      CRON_SECRET: ci-cron-secret-ci-cron-secret
+      APP_URL: http://localhost:3100
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
@@ -36,3 +38,13 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - name: Smoke test (production server, every screen and export)
+        run: |
+          npx next start -p 3100 > next.log 2>&1 &
+          for i in $(seq 1 60); do curl -fs http://localhost:3100/api/health > /dev/null && break; sleep 1; done
+          SMOKE_URL=http://localhost:3100 npm run smoke
+      - name: Load test (2,000 pages through the real engine and database)
+        run: npm run loadtest -- 2000
+      - name: Server log
+        if: failure()
+        run: cat next.log || true

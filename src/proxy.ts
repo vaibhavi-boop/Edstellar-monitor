@@ -5,7 +5,8 @@ import { SESSION_COOKIE, verifySession } from "@/server/auth/token";
  * Optimistic route protection: checks only the session signature so it stays
  * fast. Pages and server actions re-validate the user against the database.
  */
-const PUBLIC_PATHS = ["/login", "/api/health"];
+// /api/cron authenticates with its own bearer token (CRON_SECRET), not a session.
+const PUBLIC_PATHS = ["/login", "/api/health", "/api/cron"];
 
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;

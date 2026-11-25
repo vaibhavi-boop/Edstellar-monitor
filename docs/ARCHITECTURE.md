@@ -26,7 +26,7 @@ A run (`MonitoringRun`) is split into stages (`MonitoringJob`, one per `JobStage
 
 ### Issue lifecycle (phase 3)
 
-Every finding has a `fingerprint` = hash of issue type + affected resource, unique per website. Re-detection updates the existing `Issue` (`lastDetectedAt`, `occurrenceCount`) instead of inserting a new one. An issue missing from a completed run is auto-resolved; if it reappears it is reopened with `recurrenceCount + 1`. Every transition writes an `IssueOccurrence`, which is the audit trail shown on the issue page.
+Every finding has a `fingerprint` = hash of issue type + affected resource, unique per website. Re-detection updates the existing `Issue` (`lastDetectedAt`, `occurrenceCount`) instead of inserting a new one. An issue missing from a run is auto-resolved only if the run actually evaluated it: its type was in scope (broken links need a complete full scan), its page was checked (page-scope issues) or the run was not cut short (group issues such as duplicate titles). If it reappears it is reopened with `recurrenceCount + 1`. Issues a person marks *Ignored* stay ignored; issue types a website ignores are neither raised nor resolved. Every transition writes an `IssueOccurrence`, which is the audit trail shown on the issue page.
 
 ## Folder structure
 
@@ -77,11 +77,24 @@ src/server/engine/
 ├── links.ts       # <a>/<area> links and canonical from HTML (htmlparser2)
 ├── sitemaps.ts    # urlset / sitemap index / text / gzip, index tree
 ├── crawler.ts     # breadth-first crawl with a concurrency limit (no database access)
-└── run.ts         # one monitoring run: lease, jobs, persistence
+├── html.ts        # one-pass page analysis: links, title, meta, headings, canonical, JSON-LD, social tags
+├── detect.ts      # issue detectors (pure functions) with page / group / site scope
+├── reconcile.ts   # issue lifecycle: fingerprint, create, re-detect, reopen, auto-resolve
+├── findings.ts    # post-crawl stages: SEO audit rows, redirect inventory, issues
+├── checks/        # phase 4: ssl.ts (certificate), timing.ts (DNS/connect/TLS/TTFB), pagespeed.ts,
+│                  #          api.ts + api-run.ts (endpoint checks), run-checks.ts (run stages)
+├── queue.ts       # run queue, scheduling (due websites, full vs incremental), crash recovery
+├── retention.ts   # purge of old run detail
+└── run.ts         # one monitoring run: lease, jobs, persistence, run log, notifications
+src/server/notify/ # events and digests (events.ts), delivery (send.ts), dispatch after a run, settings actions
+src/app/api/cron/monitor/route.ts   # bearer-token trigger that queues runs
+scripts/           # smoke.ts (HTTP end-to-end), load-test.ts (10,000-page run)
 worker/index.ts    # CLI entry point: npm run worker -- --website <domain>
 ```
 
-Engine modules do not import `server-only` or Next.js, so the worker runs under plain Node.js (via `tsx`). Planned: detectors and the issue reconciler (phases 3–4), `src/app/api/cron/` (secured trigger; phase 5).
+Engine modules do not import `server-only` or Next.js, so the worker runs under plain Node.js (via `tsx`). Scheduling: the cron endpoint and "Run now" create QUEUED runs; `worker --loop` (or `--due` / `--queue` from a scheduler) claims them under the website's lease. See `docs/DEPLOYMENT.md`.
+
+Every Prisma client is created through `src/lib/prisma-adapter.ts`, which pins the Postgres session time zone to UTC. The driver adapter sends timestamps without an offset; on a database server whose time zone is not UTC they would otherwise be stored shifted.
 
 ## Data model
 

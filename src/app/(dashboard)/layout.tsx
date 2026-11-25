@@ -13,15 +13,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const [websites, active] = await Promise.all([listWebsites(), getActiveWebsite()]);
 
   return (
-    <div className="min-h-screen lg:pl-60">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col overflow-y-auto bg-rail lg:flex">
+    <div className="min-h-screen lg:pl-60 print:pl-0">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col overflow-y-auto bg-rail lg:flex print:hidden">
         <div className="flex h-14 shrink-0 items-center border-b border-white/10 px-5">
           <Brand />
         </div>
         <SidebarNav />
       </aside>
 
-      <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-surface/90 px-4 backdrop-blur sm:px-6">
+      <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-surface/90 px-4 backdrop-blur sm:px-6 print:hidden">
         <MobileNav />
         <WebsiteSwitcher
           websites={websites.map((w) => ({ id: w.id, name: w.name, domain: w.domain, status: w.status }))}

@@ -7,6 +7,9 @@ import { PageHeader } from "@/components/layout/page-header";
 import { WebsiteConfigForm } from "@/components/websites/website-config-form";
 import { WebsiteDangerZone } from "@/components/websites/website-danger-zone";
 import { WebsiteGeneralForm } from "@/components/websites/website-general-form";
+import { NotificationSettings } from "@/components/websites/notification-settings";
+import { db } from "@/lib/db";
+import { smtpConfigured } from "@/server/notify/send";
 import { requireUser } from "@/server/auth/session";
 import { getWebsite } from "@/server/websites/queries";
 
@@ -68,6 +71,19 @@ export default async function WebsiteSettingsPage({
           </CardDescription>
         </CardHeader>
         <WebsiteConfigForm websiteId={website.id} domain={website.domain} config={website.configuration} canEdit={canEdit} />
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Notifications</CardTitle>
+          <CardDescription>Email or Slack, per event. Sent after each monitoring run as one digest, and only for changes, never for issues that are simply still open.</CardDescription>
+        </CardHeader>
+        <NotificationSettings
+          websiteId={website.id}
+          canEdit={canEdit}
+          smtpReady={smtpConfigured()}
+          prefs={(await db.notificationPreference.findMany({ where: { websiteId: website.id }, orderBy: { createdAt: "asc" }, select: { id: true, channel: true, target: true, events: true, isEnabled: true } }))}
+        />
       </Card>
 
       {canEdit && (

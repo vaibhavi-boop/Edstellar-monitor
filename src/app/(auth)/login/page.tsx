@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { BrandMark } from "@/components/layout/brand";
 import { getCurrentUser } from "@/server/auth/session";
 import { LoginForm } from "./login-form";
 
@@ -12,15 +13,12 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     <main className="grid min-h-screen lg:grid-cols-[1fr_minmax(420px,520px)]">
       <section className="relative hidden overflow-hidden bg-rail p-12 text-rail-foreground lg:flex lg:flex-col lg:justify-between">
         <div className="flex items-center gap-2.5">
-          <svg viewBox="0 0 32 32" className="size-8" aria-hidden="true">
-            <rect width="32" height="32" rx="7" fill="#2347d1" />
-            <path d="M6 18h5l3-8 4 13 3-7h5" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span className="text-[15px] font-semibold text-white">Edstellar Monitor</span>
+          <BrandMark className="size-8" />
+          <span className="font-[family-name:var(--font-heading)] text-[15px] font-semibold text-white">Edstellar Monitor</span>
         </div>
         <div className="max-w-md">
-          <p className="text-[28px] font-semibold leading-tight tracking-[-0.015em] text-white">
-            Every page of edstellar.com, checked every four hours.
+          <p className="font-[family-name:var(--font-heading)] text-[30px] font-semibold leading-tight tracking-[-0.02em] text-white">
+            Every page of edstellar.com, <span className="text-accent">checked every four hours.</span>
           </p>
           <p className="mt-4 text-[15px] leading-relaxed text-rail-muted">
             Availability, broken links, SEO, redirects, APIs, SSL and performance, with a record of when each problem
@@ -31,7 +29,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <path
             d="M0 52h70l14-30 18 46 14-34 10 18h90l12-22 16 38 12-26h70l14-20 16 32 12-14h92"
             fill="none"
-            stroke="#8aa6ff"
+            stroke="var(--accent)"
             strokeWidth="2"
             strokeLinejoin="round"
           />

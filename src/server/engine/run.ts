@@ -2,19 +2,24 @@ import { z } from "zod";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import type { Availability, JobStage, ScanType, RunTrigger } from "@/generated/prisma/enums";
 import { crawl, type CrawlSeed, type PageResult } from "./crawler";
+import type { LinkSources, PageRecord } from "./detect";
+import { processFindings, type FindingsSummary } from "./findings";
+import { runChecks, type ChecksResult } from "./checks/run-checks";
+import { dispatchNotifications } from "@/server/notify/dispatch";
 import { classifyError, defaultFetchPolicy, fetchWithRetry, type ExpectedResponse, type FetchPolicy, type WantBody } from "./http";
 import { normalizeUrl, parseHttpUrl } from "./normalize";
+import { LEASE_MS } from "./queue";
 import { allowAllRobots, parseRobotsTxt, type RobotsTxt } from "./robots";
 import { createHostMapper, createScope, globToRegExp } from "./scope";
 import { readSitemaps } from "./sitemaps";
 
 /**
- * One monitoring run for one website (phase 2 stages: robots.txt, sitemaps,
+ * One monitoring run for one website (robots.txt, sitemaps, crawl and
+ * availability; then SEO audit, redirects and issues — see findings.ts —
  * discovery/crawl and availability). Takes the website's lease so runs never
  * overlap, renews it while working, and records progress in MonitoringJob rows.
  */
 
-const LEASE_MS = 5 * 60_000;
 const HEARTBEAT_MS = 30_000;
 const MAX_CRAWL_DELAY_S = 10;
 const BROKEN: readonly Availability[] = ["CLIENT_ERROR", "SERVER_ERROR", "TIMEOUT", "DNS_ERROR", "SSL_ERROR", "CONNECTION_ERROR"];
@@ -38,7 +43,13 @@ export interface RunOptions {
   log?: (message: string) => void;
   /** Tests replace the URL guard and DNS lookup to reach a local server. */
   fetchPolicy?: Partial<FetchPolicy>;
+  /** Start this QUEUED run (from the queue) instead of creating a new one. */
+  queuedRunId?: string;
+  /** Base URL for links in notifications. Notifications are not sent when omitted. */
+  appUrl?: string;
 }
+
+const MAX_LOG_LINES = 400;
 
 export interface RunReport {
   runId: string;
@@ -73,6 +84,11 @@ export interface RunSummary {
   };
   availability: Partial<Record<Availability, number>>;
   hostAliases: string[];
+  findings?: FindingsSummary;
+  checks?: ChecksResult["summary"];
+  notifications?: { sent: number; failed: number; skipped: number };
+  /** The run's log, as printed by the worker (first and last lines if it was long). */
+  log?: string[];
 }
 
 const expectedSchema = z.array(z.object({ pattern: z.string().startsWith("/"), status: z.number().int().min(100).max(599) }));
@@ -102,17 +118,27 @@ async function startRun(db: PrismaClient, websiteId: string, options: RunOptions
         });
         await tx.monitoringLock.delete({ where: { websiteId } });
       }
-      const run = await tx.monitoringRun.create({
-        data: {
-          websiteId,
-          trigger: options.trigger,
-          scanType: options.scanType,
-          status: "RUNNING",
-          startedAt: now,
-          heartbeatAt: now,
-          triggeredById: options.triggeredById ?? null,
-        },
-      });
+      let run;
+      if (options.queuedRunId) {
+        const claimed = await tx.monitoringRun.updateMany({
+          where: { id: options.queuedRunId, websiteId, status: "QUEUED" },
+          data: { status: "RUNNING", startedAt: now, heartbeatAt: now },
+        });
+        if (claimed.count !== 1) throw new RunInProgressError();
+        run = await tx.monitoringRun.findUniqueOrThrow({ where: { id: options.queuedRunId } });
+      } else {
+        run = await tx.monitoringRun.create({
+          data: {
+            websiteId,
+            trigger: options.trigger,
+            scanType: options.scanType,
+            status: "RUNNING",
+            startedAt: now,
+            heartbeatAt: now,
+            triggeredById: options.triggeredById ?? null,
+          },
+        });
+      }
       await tx.monitoringLock.create({ data: { websiteId, monitoringRunId: run.id, leaseUntil: new Date(now.getTime() + LEASE_MS) } });
       return run;
     });
@@ -123,7 +149,18 @@ async function startRun(db: PrismaClient, websiteId: string, options: RunOptions
 }
 
 export async function runMonitoring(db: PrismaClient, websiteId: string, options: RunOptions): Promise<RunReport> {
-  const log = options.log ?? (() => {});
+  const logLines: string[] = [];
+  let droppedLines = 0;
+  const log = (message: string) => {
+    const line = `${new Date().toISOString().slice(11, 19)} ${message}`;
+    if (logLines.length < MAX_LOG_LINES) logLines.push(line);
+    else {
+      droppedLines++;
+      logLines[MAX_LOG_LINES - 1] = line;
+    }
+    options.log?.(message);
+  };
+  const savedLog = () => (droppedLines ? [...logLines.slice(0, -1), `… ${droppedLines} lines omitted …`, logLines.at(-1)!] : logLines);
   const signal = options.signal;
   const website = await db.website.findUnique({ where: { id: websiteId }, include: { configuration: true } });
   if (!website) throw new Error("Website not found");
@@ -274,6 +311,10 @@ export async function runMonitoring(db: PrismaClient, websiteId: string, options
     let newUrls = 0;
     let failed = 0;
     let homeOk = false;
+    const pages = new Map<string, PageRecord>();
+    const discoveredIds = new Map<string, string>();
+    const links = new Map<string, LinkSources>();
+    const depths = new Map<string, number>();
 
     const onResult = async (r: PageResult) => {
       const now = new Date();
@@ -312,6 +353,36 @@ export async function runMonitoring(db: PrismaClient, websiteId: string, options
           errorMessage: r.errorMessage,
         },
       });
+
+      discoveredIds.set(r.normalizedUrl, row.id);
+      depths.set(r.normalizedUrl, r.depth);
+      const canonical = r.analysis?.canonical ? prepare(r.analysis.canonical) : null;
+      const { links: _pageLinks, ...analysis } = r.analysis ?? { links: [] };
+      void _pageLinks;
+      pages.set(r.normalizedUrl, {
+        normalized: r.normalizedUrl,
+        url: r.url,
+        inSitemap: r.inSitemap,
+        availability: r.availability,
+        statusCode: r.statusCode,
+        finalStatus: r.finalStatus,
+        finalUrl: r.finalUrl,
+        chain: r.chain,
+        redirectLoop: r.redirectLoop,
+        errorMessage: r.errorMessage,
+        robotsBlocked: r.robotsBlocked,
+        robotsDisallowed: robotsFound && !robots.isAllowed(new URL(r.url)),
+        xRobotsTag: r.xRobotsTag,
+        analysis: r.analysis ? (analysis as PageRecord["analysis"]) : null,
+        canonicalNormalized: canonical?.normalized ?? null,
+        canonicalInScope: canonical ? inScope(canonical.url) : false,
+      });
+      for (const target of r.outLinks) {
+        const entry = links.get(target) ?? { count: 0, sources: [] };
+        entry.count++;
+        if (entry.sources.length < 20) entry.sources.push(r.url);
+        links.set(target, entry);
+      }
 
       processed++;
       counts[r.availability] = (counts[r.availability] ?? 0) + 1;
@@ -356,6 +427,53 @@ export async function runMonitoring(db: PrismaClient, websiteId: string, options
       deactivated = gone.count;
     }
 
+    const checks = result.cancelled
+      ? null
+      : await runChecks({
+          db,
+          websiteId: website.id,
+          runId: run.id,
+          siteUrl: website.url,
+          sslWarningDays: cfg.sslWarningDays,
+          pageSpeedEnabled: cfg.pageSpeedEnabled,
+          pageSpeedKey: process.env.PAGESPEED_API_KEY?.trim() || undefined,
+          policy,
+          upPages: [...pages.values()]
+            .filter((p) => p.availability === "UP" && p.analysis && discoveredIds.has(p.normalized))
+            .map((p) => ({ normalized: p.normalized, url: p.url, id: discoveredIds.get(p.normalized)!, depth: depths.get(p.normalized) ?? 0 })),
+          homeNormalized: homeNormalized ?? "",
+          log,
+        });
+
+    const { summary: findings, transitions } = await processFindings({
+      db,
+      websiteId: website.id,
+      runId: run.id,
+      scanType: options.scanType,
+      startedAt: new Date(started),
+      complete: !result.truncated && !result.cancelled,
+      pages,
+      discoveredIds,
+      links,
+      homeNormalized: homeNormalized ?? "",
+      robots: { url: robotsUrl, found: robotsFound, statusCode: robotsStatus, error: robotsError, sitemaps: robots.sitemaps },
+      sitemaps: sitemapRead.nodes,
+      normalize: (url) => prepare(url)?.normalized ?? null,
+      ignoredTypes: cfg.ignoredIssueTypes,
+      log,
+      extra: checks ? { detected: checks.detected, checkedKeys: checks.checkedKeys, evaluated: checks.evaluated } : undefined,
+    });
+
+    let notifications: RunSummary["notifications"];
+    if (options.appUrl) {
+      try {
+        notifications = await dispatchNotifications(db, { websiteId: website.id, runId: run.id, runNumber: run.number, transitions, appUrl: options.appUrl });
+        if (notifications.sent || notifications.failed) log(`Notifications: ${notifications.sent} sent, ${notifications.failed} failed`);
+      } catch (error) {
+        log(`Notifications could not be prepared: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
     const status = result.cancelled ? "CANCELLED" : result.truncated ? "PARTIAL" : "COMPLETED";
     const durationMs = Date.now() - started;
     const summary: RunSummary = {
@@ -389,6 +507,9 @@ export async function runMonitoring(db: PrismaClient, websiteId: string, options
       },
       availability: counts,
       hostAliases: cfg.hostAliases,
+      findings,
+      checks: checks?.summary,
+      notifications,
     };
 
     const finishedAt = new Date();
@@ -410,6 +531,9 @@ export async function runMonitoring(db: PrismaClient, websiteId: string, options
           urlsChecked: result.checked,
           newUrls,
           failedChecks: failed,
+          newIssues: findings.issues.created,
+          updatedIssues: findings.issues.redetected + findings.issues.reopened,
+          resolvedIssues: findings.issues.resolved,
           errorMessage: result.cancelled ? "Cancelled before all URLs were checked" : null,
           summary: summary as unknown as Prisma.InputJsonValue,
         },
@@ -420,6 +544,8 @@ export async function runMonitoring(db: PrismaClient, websiteId: string, options
         (result.truncated ? `, stopped at the ${maxUrls}-URL limit` : "") +
         (deactivated ? `, ${deactivated} no longer found` : ""),
     );
+    summary.log = savedLog();
+    await db.monitoringRun.update({ where: { id: run.id }, data: { summary: summary as unknown as Prisma.InputJsonValue } }).catch(() => {});
     return { runId: run.id, runNumber: run.number, status, durationMs, summary };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -432,7 +558,13 @@ export async function runMonitoring(db: PrismaClient, websiteId: string, options
       db.crawlRun.update({ where: { id: crawlRun.id }, data: { status: "FAILED", finishedAt } }),
       db.monitoringRun.update({
         where: { id: run.id },
-        data: { status: "FAILED", finishedAt, durationMs: Date.now() - started, errorMessage: message.slice(0, 1000) },
+        data: {
+          status: "FAILED",
+          finishedAt,
+          durationMs: Date.now() - started,
+          errorMessage: message.slice(0, 1000),
+          summary: { log: [...savedLog(), `${finishedAt.toISOString().slice(11, 19)} Failed: ${message.slice(0, 500)}`] },
+        },
       }),
     ]).catch(() => {});
     throw error;

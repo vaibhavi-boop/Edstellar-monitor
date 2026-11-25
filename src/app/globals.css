@@ -1,73 +1,85 @@
 @import "tailwindcss";
-@import "@fontsource-variable/public-sans";
+@import "@fontsource-variable/dm-sans";
+@import "@fontsource-variable/sora";
 @import "@fontsource-variable/jetbrains-mono";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
-  Design tokens. Cobalt primary on cool neutrals; the navy rail anchors the
-  layout. Severity colours are fixed across themes so a "critical" badge
-  means the same thing everywhere.
+  Design tokens in the Edstellar brand (taken from edstellar.com): navy ink
+  (#0a1628) on warm paper, with electric lime (#c8f135) as the accent. Lime is
+  too light to read on paper, so in the light theme it marks active states and
+  highlights while navy carries text, links and buttons; in the dark theme lime
+  becomes the primary colour. Severity colours stay distinct in both themes so a
+  "critical" badge means the same thing everywhere.
 */
 :root {
-  --background: #f4f6f9;
-  --surface: #ffffff;
-  --surface-muted: #eef1f5;
-  --foreground: #142033;
-  --muted-foreground: #5c6b80;
-  --border: #dce2ea;
-  --input: #cbd3de;
-  --ring: #2347d1;
-  --primary: #2347d1;
-  --primary-hover: #1b39ad;
-  --primary-foreground: #ffffff;
-  --primary-soft: #e6ecff;
-  --destructive: #c8102e;
-  --destructive-soft: #fde8eb;
-  --success: #1e8e5a;
-  --success-soft: #e3f4ec;
-  --warning: #b88a00;
-  --warning-soft: #fdf4d8;
+  --background: #f5f3eb;
+  --surface: #fffef8;
+  --surface-muted: #f2f0e8;
+  --foreground: #0a1628;
+  --muted-foreground: #5a6270;
+  --border: #e2ded1;
+  --input: #948d7c;
+  --ring: #14233d;
+  --primary: #0a1628;
+  --primary-hover: #14233d;
+  --primary-foreground: #fffef8;
+  --primary-soft: #eef9c4;
+  --accent: #c8f135;
+  --accent-foreground: #0a1628;
+  --accent-soft: #e4f89a;
+  --destructive: #b3261e;
+  --destructive-soft: #fdebeb;
+  --success: #2f7a17;
+  --success-soft: #e9f5dc;
+  --warning: #8a5a00;
+  --warning-soft: #fdf2e3;
+  --gold: #c3a36f;
 
-  --rail: #0f1b2e;
-  --rail-foreground: #c7d0dd;
-  --rail-muted: #7d8ba1;
-  --rail-active: #1c2b45;
-  --rail-accent: #8aa6ff;
+  --rail: #0a1628;
+  --rail-foreground: #d9dde4;
+  --rail-muted: #8b95a6;
+  --rail-active: #14233d;
+  --rail-accent: #c8f135;
 
-  --sev-critical: #c8102e;
-  --sev-high: #d9620b;
-  --sev-medium: #b88a00;
-  --sev-low: #2f72c4;
-  --sev-info: #6b778c;
+  --sev-critical: #b3261e;
+  --sev-high: #d4570b;
+  --sev-medium: #a87800;
+  --sev-low: #2f6fb3;
+  --sev-info: #6b7587;
 }
 
 .dark {
-  --background: #0b1220;
-  --surface: #111a2b;
-  --surface-muted: #172236;
-  --foreground: #e6ebf2;
-  --muted-foreground: #8d9aae;
-  --border: #22304a;
-  --input: #2d3d5a;
-  --ring: #6e8bff;
-  --primary: #6e8bff;
-  --primary-hover: #8aa1ff;
-  --primary-foreground: #0b1220;
-  --primary-soft: #1b2850;
-  --destructive: #ff5c72;
-  --destructive-soft: #3a1520;
-  --success: #3cc68a;
-  --success-soft: #11301f;
-  --warning: #e6b833;
-  --warning-soft: #33290d;
+  --background: #050d1a;
+  --surface: #0a1628;
+  --surface-muted: #14233d;
+  --foreground: #f2f0e8;
+  --muted-foreground: #9aa3b2;
+  --border: #1f2e48;
+  --input: #56678a;
+  --ring: #c8f135;
+  --primary: #c8f135;
+  --primary-hover: #d7f76b;
+  --primary-foreground: #0a1628;
+  --primary-soft: #222f16;
+  --accent: #c8f135;
+  --accent-foreground: #0a1628;
+  --accent-soft: #222f16;
+  --destructive: #ff8a80;
+  --destructive-soft: #3a1518;
+  --success: #8fd16a;
+  --success-soft: #16281a;
+  --warning: #f0c060;
+  --warning-soft: #2e2410;
 
-  --rail: #070d18;
-  --rail-active: #15213a;
+  --rail: #050d1a;
+  --rail-active: #14233d;
 }
 
 @theme inline {
-  --font-sans: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "DM Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Sora Variable", "DM Sans Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --color-background: var(--background);
@@ -82,6 +94,10 @@
   --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary-soft: var(--primary-soft);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-soft: var(--accent-soft);
+  --color-gold: var(--gold);
   --color-destructive: var(--destructive);
   --color-destructive-soft: var(--destructive-soft);
   --color-success: var(--success);
@@ -120,6 +136,16 @@
     font-family: var(--font-sans);
     font-feature-settings: "tnum" 1, "cv11" 1;
     -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.01em;
+  }
+  ::selection {
+    background: var(--accent);
+    color: var(--accent-foreground);
   }
   :focus-visible {
     outline: 2px solid var(--ring);

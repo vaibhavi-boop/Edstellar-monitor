@@ -12,6 +12,8 @@ import { StatTile } from "@/components/dashboard/stat-tile";
 import { HEALTH_WEIGHTS, ISSUE_PENALTIES } from "@/lib/health-score";
 import { formatMs, formatNumber, formatPercent, frequencyLabel } from "@/lib/utils";
 import { requireUser } from "@/server/auth/session";
+import { hasRole } from "@/server/auth/roles";
+import { RunNowButton } from "@/components/runs/run-now";
 import { getOverview } from "@/server/dashboard/overview";
 import { getActiveWebsite, getWebsite } from "@/server/websites/queries";
 
@@ -63,7 +65,10 @@ export default async function OverviewPage() {
           </>
         }
         actions={
-          active.status === "PAUSED" ? <Badge tone="warning">Monitoring paused</Badge> : <Badge tone="success">Monitoring on</Badge>
+          <div className="flex items-start gap-3">
+            <span className="pt-2">{active.status === "PAUSED" ? <Badge tone="warning">Monitoring paused</Badge> : <Badge tone="success">Monitoring on</Badge>}</span>
+            {hasRole(user.role, "EDITOR") && active.status === "ACTIVE" && <RunNowButton websiteId={active.id} />}
+          </div>
         }
       />
 
@@ -116,13 +121,13 @@ export default async function OverviewPage() {
             <Radar className="size-4 shrink-0" />
             {data.lastRun ? (
               <span>
-                Last run #{data.lastRun.number}: {data.lastRun.status.toLowerCase()},{" "}
+                <Link href={`/history/${data.lastRun.number}`} className="hover:text-foreground hover:underline">Last run #{data.lastRun.number}</Link>: {data.lastRun.status.toLowerCase()},{" "}
                 <LocalTime value={data.lastRun.finishedAt ?? data.lastRun.startedAt} mode="relative" />
               </span>
             ) : (
               <span>
-                No monitoring run yet. Start one with{" "}
-                <code className="font-mono text-xs">npm run worker -- --website {active.domain}</code>; the four-hour schedule arrives in build phase 5.
+                No monitoring run yet. Use “Run now”, or start one from a terminal with{" "}
+                <code className="font-mono text-xs">npm run worker -- --website {active.domain}</code>.
               </span>
             )}
           </div>

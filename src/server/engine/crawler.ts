@@ -1,6 +1,6 @@
 import type { UrlSource } from "@/generated/prisma/enums";
-import { classifyOutcome, type CheckResult, type ExpectedResponse, type FetchOutcome, type WantBody } from "./http";
-import { extractLinks } from "./links";
+import { classifyOutcome, type CheckResult, type ExpectedResponse, type FetchOutcome, type RedirectHop, type WantBody } from "./http";
+import { analyzeHtml, type PageAnalysis } from "./html";
 
 export interface CrawlSeed {
   url: string;
@@ -21,6 +21,16 @@ export interface PageResult extends CheckResult {
   robotsBlocked: boolean;
   canonicalUrl: string | null;
   attempts: number;
+  /** Every redirect hop followed, in order. */
+  chain: RedirectHop[];
+  redirectLoop: boolean;
+  /** Status of the last response (after redirects); null on network errors. */
+  finalStatus: number | null;
+  xRobotsTag: string | null;
+  /** SEO facts for in-scope HTML pages that returned 2xx; otherwise null. */
+  analysis: PageAnalysis | null;
+  /** Normalised in-scope URLs this page links to (excluding itself). */
+  outLinks: string[];
 }
 
 export interface CrawlerOptions {
@@ -33,7 +43,7 @@ export interface CrawlerOptions {
   maxUrls: number;
   maxDepth: number;
   concurrency: number;
-  /** Full scans read HTML and follow links; incremental scans only re-check the seeds. */
+  /** Full scans follow links; incremental scans only re-check the seeds (pages are still analysed). */
   discoverLinks: boolean;
   /** Minimum gap between request starts (robots.txt Crawl-delay). */
   minIntervalMs: number;
@@ -72,23 +82,26 @@ export async function crawl(options: CrawlerOptions): Promise<CrawlSummary> {
   let checked = 0;
   let robotsBlocked = 0;
 
-  const add = (raw: string, meta: Omit<QueueItem, "url" | "normalized">) => {
+  /** Queues a URL (unless `enqueue` is false). Returns its normalised key when it is in scope. */
+  const add = (raw: string, meta: Omit<QueueItem, "url" | "normalized">, enqueue = true): string | null => {
     const prepared = options.prepare(raw);
-    if (!prepared) return;
+    if (!prepared) return null;
     const existing = known.get(prepared.normalized);
     if (existing) {
       existing.inSitemap ||= meta.inSitemap;
       existing.isManual ||= meta.isManual;
-      return;
+      return prepared.normalized;
     }
-    if (!options.inScope(prepared.url)) return;
+    if (!options.inScope(prepared.url)) return null;
+    if (!enqueue) return prepared.normalized;
     if (known.size >= options.maxUrls) {
       truncated = true;
-      return;
+      return prepared.normalized;
     }
     const item = { url: prepared.url.href, normalized: prepared.normalized, ...meta };
     known.set(prepared.normalized, item);
     queue.push(item);
+    return prepared.normalized;
   };
 
   for (const seed of options.seeds) {
@@ -127,6 +140,12 @@ export async function crawl(options: CrawlerOptions): Promise<CrawlSummary> {
         robotsBlocked: true,
         canonicalUrl: null,
         attempts: 0,
+        chain: [],
+        redirectLoop: false,
+        finalStatus: null,
+        xRobotsTag: null,
+        analysis: null,
+        outLinks: [],
         statusCode: null,
         availability: "BLOCKED",
         responseTimeMs: null,
@@ -143,22 +162,38 @@ export async function crawl(options: CrawlerOptions): Promise<CrawlSummary> {
     if (options.signal?.aborted) return;
     const followLinks = options.discoverLinks && item.depth < options.maxDepth;
     const wantBody: WantBody = (u, status, headers) =>
-      followLinks && status >= 200 && status < 300 && options.inScope(u) && HTML_TYPES.test(String(headers["content-type"] ?? ""));
+      status >= 200 && status < 300 && options.inScope(u) && HTML_TYPES.test(String(headers["content-type"] ?? ""));
 
     const outcome = await options.fetch(item.url, wantBody, options.signal);
     const check = classifyOutcome(outcome, url, options.expected);
 
-    let canonicalUrl: string | null = null;
+    let analysis: PageAnalysis | null = null;
+    const outLinks = new Set<string>();
     if (outcome.ok && outcome.response.body) {
-      const { links, canonical } = extractLinks(outcome.response.body.toString("utf8"), outcome.response.url);
-      canonicalUrl = canonical;
+      analysis = analyzeHtml(outcome.response.body.toString("utf8"), outcome.response.url);
       const meta = { depth: item.depth + 1, inSitemap: false, isManual: false };
-      for (const link of links) add(link, { ...meta, source: "CRAWL" });
-      if (canonical) add(canonical, { ...meta, source: "CANONICAL" });
+      for (const link of analysis.links) {
+        const key = add(link, { ...meta, source: "CRAWL" }, followLinks);
+        if (key && key !== item.normalized) outLinks.add(key);
+      }
+      if (analysis.canonical) add(analysis.canonical, { ...meta, source: "CANONICAL" }, followLinks);
     }
+    const xRobots = outcome.ok ? outcome.response.headers["x-robots-tag"] : undefined;
 
     checked++;
-    await options.onResult({ ...base(item), ...check, robotsBlocked: false, canonicalUrl, attempts: outcome.attempts });
+    await options.onResult({
+      ...base(item),
+      ...check,
+      robotsBlocked: false,
+      canonicalUrl: analysis?.canonical ?? null,
+      attempts: outcome.attempts,
+      chain: outcome.chain,
+      redirectLoop: !outcome.ok && outcome.loop,
+      finalStatus: outcome.ok ? outcome.response.status : null,
+      xRobotsTag: xRobots ? (Array.isArray(xRobots) ? xRobots.join(", ") : xRobots) : null,
+      analysis,
+      outLinks: [...outLinks],
+    });
   };
 
   // Worker pool over a growing queue: FIFO order keeps it breadth-first.

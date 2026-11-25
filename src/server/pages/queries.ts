@@ -38,7 +38,7 @@ export interface PageFilters {
 }
 
 function pick<T extends string>(value: unknown, allowed: Record<T, unknown>, fallback: T): T {
-  return typeof value === "string" && value in allowed ? (value as T) : fallback;
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(allowed, value) ? (value as T) : fallback;
 }
 
 /** Reads ?q=&status=&source=&sort=&dir=&page= defensively; anything unknown falls back to the default. */

@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 /** The latest build phase that is complete. */
-export const BUILT_PHASE = 2;
+export const BUILT_PHASE = 6;
 
 export interface NavItem {
   href: string;

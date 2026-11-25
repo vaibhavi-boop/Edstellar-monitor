@@ -26,6 +26,13 @@ const ACTION_LABELS: Record<string, string> = {
   "website.resumed": "Resumed monitoring",
   "website.deleted": "Deleted a website",
   "url.added_manually": "Added a URL manually",
+  "issue.status_changed": "Changed an issue's status",
+  "api.created": "Added an API endpoint",
+  "api.updated": "Edited an API endpoint",
+  "api.deleted": "Deleted an API endpoint",
+  "run.requested": "Queued a monitoring run",
+  "notification.added": "Added a notification recipient",
+  "notification.removed": "Removed a notification recipient",
 };
 
 function detail(metadata: unknown): string {
@@ -36,6 +43,7 @@ function detail(metadata: unknown): string {
   if (typeof m.from === "string" && typeof m.to === "string") return `${m.from.toLowerCase()} to ${m.to.toLowerCase()}`;
   if (typeof m.domain === "string") return m.domain;
   if (typeof m.url === "string") return m.url;
+  if (typeof m.name === "string") return m.name;
   return "";
 }
 

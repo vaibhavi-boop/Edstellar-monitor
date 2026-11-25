@@ -142,7 +142,7 @@ export function WebsiteConfigForm({
             <Checkbox name="pageSpeedEnabled" defaultChecked={config.pageSpeedEnabled} className="mt-0.5" />
             <span>
               Collect PageSpeed Insights scores
-              <span className="block text-[13px] text-muted-foreground">Needs PAGESPEED_API_KEY. Used from build phase 4.</span>
+              <span className="block text-[13px] text-muted-foreground">Lighthouse scores for up to 5 key pages per run. Needs PAGESPEED_API_KEY on the server that runs the worker.</span>
             </span>
           </label>
         </Section>

@@ -71,6 +71,8 @@ export interface SitemapNode {
   statusCode: number | null;
   isValid: boolean;
   errorMessage: string | null;
+  /** unavailable = could not be fetched (network error or non-200); invalid = fetched but not a usable sitemap. */
+  problem: "unavailable" | "invalid" | null;
   /** Page URLs listed in this file (urlsets only). */
   locs: string[];
 }
@@ -114,6 +116,7 @@ export async function readSitemaps(
       statusCode: null,
       isValid: false,
       errorMessage: null,
+      problem: null,
       locs: [],
     };
     const outcome = await fetchSitemap(item.url);
@@ -121,6 +124,7 @@ export async function readSitemaps(
     if (!outcome.ok) {
       node.statusCode = outcome.chain[0]?.status ?? null;
       node.errorMessage = classifyError(outcome.error).message;
+      node.problem = "unavailable";
       nodes.push(node);
       continue;
     }
@@ -129,11 +133,13 @@ export async function readSitemaps(
     if (response.status !== 200) {
       if (item.optional && response.status === 404) continue;
       node.errorMessage = `HTTP ${response.status}`;
+      node.problem = "unavailable";
       nodes.push(node);
       continue;
     }
     if (response.bodyTruncated) {
       node.errorMessage = "Larger than 50 MB; only the first part was read";
+      node.problem = "invalid";
     }
 
     let parsed: ParsedSitemap;
@@ -141,6 +147,7 @@ export async function readSitemaps(
       parsed = parseSitemap(sitemapBodyText(response.body ?? Buffer.alloc(0)));
     } catch (error) {
       node.errorMessage = `Could not read the file: ${error instanceof Error ? error.message : String(error)}`;
+      node.problem = "invalid";
       nodes.push(node);
       continue;
     }
@@ -148,6 +155,7 @@ export async function readSitemaps(
     if (parsed.kind === "unknown") {
       if (item.optional) continue;
       node.errorMessage ??= "Not a sitemap: expected <urlset> or <sitemapindex>";
+      node.problem = "invalid";
       nodes.push(node);
       continue;
     }
@@ -166,7 +174,11 @@ export async function readSitemaps(
         }
       }
     } else {
-      if (parsed.locs.length > 50_000) node.errorMessage = `Lists ${parsed.locs.length} URLs; the limit per file is 50,000`;
+      if (parsed.locs.length > 50_000) {
+        node.errorMessage = `Lists ${parsed.locs.length} URLs; the limit per file is 50,000`;
+        node.problem = "invalid";
+        node.isValid = false;
+      }
       node.locs = parsed.locs;
     }
     nodes.push(node);

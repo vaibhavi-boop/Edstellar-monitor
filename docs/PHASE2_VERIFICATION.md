@@ -23,7 +23,7 @@ New tests:
 | robots.txt | read: 2 rules for `*` (`Disallow: /`); ignored because *Respect robots.txt* is off for this website |
 | Sitemap | `/sitemap.xml`: 1 urlset, 2,535 URLs, all on `www.edstellar.com`, all mapped onto the deployment through host aliases |
 | Trial run (`--max-urls 30`) | 30 URLs checked, all 200; run PARTIAL (limit reached), jobs and lease recorded, lease released |
-| Full run (2,535 sitemap URLs + crawl) | in progress when this was committed; results to follow |
+| Full run #2 (2,535 sitemap URLs + crawl) | COMPLETED in 23.8 min: 2,656 URLs (2,534 from the sitemap, 122 found only by following links), 2,654 × 200, 1 × 301, 1 × 410; within the 10,000-URL limit, so nothing was truncated |
 | Second worker while a run is active | refused: "Another run (#2) is already in progress", exit code 3 |
 | Unknown website / bad `--scan` | clear error, exit code 2 |
 | Pages, Pages with filters and sorting, Sitemap, Overview | render with real data (HTTP 200) on the dev server |
