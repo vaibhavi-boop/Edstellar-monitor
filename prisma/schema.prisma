@@ -1,0 +1,693 @@
+// Edstellar Monitor — complete database schema.
+// Every model for all six phases is defined up front so later phases add
+// behaviour, not tables. All timestamps are stored in UTC (timestamptz).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum WebsiteStatus {
+  ACTIVE
+  PAUSED
+}
+
+enum IssueStatus {
+  NEW
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  IGNORED
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
+}
+
+enum IssueCategory {
+  AVAILABILITY
+  BROKEN_LINK
+  SEO
+  REDIRECT
+  API
+  PERFORMANCE
+  SSL
+  DNS
+  SITEMAP
+  ROBOTS
+}
+
+enum OccurrenceKind {
+  DETECTED
+  REDETECTED
+  RECURRED
+  AUTO_RESOLVED
+  STATUS_CHANGED
+}
+
+enum RunTrigger {
+  SCHEDULED
+  MANUAL
+}
+
+enum ScanType {
+  FULL
+  INCREMENTAL
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+enum JobStage {
+  AVAILABILITY
+  SITEMAP
+  DISCOVERY
+  CRAWL
+  LINKS
+  SEO
+  API
+  REDIRECTS
+  SSL_DNS
+  PERFORMANCE
+  ISSUES
+  REPORT
+  NOTIFY
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum UrlSource {
+  SITEMAP
+  CRAWL
+  CANONICAL
+  MANUAL
+}
+
+enum Availability {
+  UP
+  REDIRECT
+  CLIENT_ERROR
+  SERVER_ERROR
+  TIMEOUT
+  DNS_ERROR
+  SSL_ERROR
+  CONNECTION_ERROR
+  BLOCKED
+}
+
+enum HttpMethod {
+  GET
+  POST
+  PUT
+  PATCH
+  DELETE
+}
+
+enum ApiAuthType {
+  NONE
+  BEARER
+  BASIC
+  API_KEY_HEADER
+}
+
+enum PerformanceSource {
+  HTTP
+  PAGESPEED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SLACK
+}
+
+enum NotificationEvent {
+  WEBSITE_DOWN
+  CRITICAL_ISSUE
+  NEW_404
+  API_FAILURE
+  SSL_EXPIRY
+  PERFORMANCE_DEGRADATION
+  CRITICAL_RESOLVED
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  SUPPRESSED
+}
+
+// ───────────────────────── Users & auth ─────────────────────────
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String
+  passwordHash   String
+  role           Role      @default(VIEWER)
+  isActive       Boolean   @default(true)
+  // Incrementing this invalidates every session issued to the user.
+  sessionVersion Int       @default(1)
+  lastLoginAt    DateTime? @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
+
+  websitesCreated         Website[]                @relation("WebsiteCreatedBy")
+  auditLogs               AuditLog[]
+  notificationPreferences NotificationPreference[]
+  issueOccurrences        IssueOccurrence[]
+  assignedIssues          Issue[]                  @relation("IssueAssignee")
+}
+
+/// Login throttling. Rows older than the throttle window can be purged.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  email     String
+  ipHash    String
+  success   Boolean
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([email, createdAt])
+  @@index([ipHash, createdAt])
+}
+
+// ─────────────────────────── Websites ───────────────────────────
+
+model Website {
+  id          String        @id @default(cuid())
+  name        String
+  url         String
+  domain      String        @unique
+  status      WebsiteStatus @default(ACTIVE)
+  createdById String?
+  createdAt   DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime      @updatedAt @db.Timestamptz(3)
+
+  createdBy          User?                    @relation("WebsiteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  configuration      WebsiteConfiguration?
+  discoveredUrls     DiscoveredUrl[]
+  crawlRuns          CrawlRun[]
+  monitoringRuns     MonitoringRun[]
+  monitoringLock     MonitoringLock?
+  issues             Issue[]
+  apiEndpoints       ApiEndpoint[]
+  redirects          Redirect[]
+  performanceResults PerformanceResult[]
+  sslChecks          SslCheck[]
+  sitemaps           Sitemap[]
+  notifications      Notification[]
+  notificationPrefs  NotificationPreference[]
+}
+
+model WebsiteConfiguration {
+  id                    String   @id @default(cuid())
+  websiteId             String   @unique
+  crawlFrequencyMinutes Int      @default(240)
+  crawlDepth            Int      @default(10)
+  maxUrls               Int      @default(10000)
+  concurrentRequests    Int      @default(4)
+  requestTimeoutMs      Int      @default(15000)
+  retryAttempts         Int      @default(3)
+  userAgent             String   @default("EdstellarMonitor/1.0 (+https://www.edstellar.com)")
+  respectRobotsTxt      Boolean  @default(true)
+  includeWwwVariant     Boolean  @default(true)
+  includePatterns       String[] @default([])
+  excludePatterns       String[] @default([])
+  ignoredIssueTypes     String[] @default([])
+  /// Query parameters that make a page distinct. All others are stripped during normalisation.
+  keptQueryParams       String[] @default(["page"])
+  /// Status codes that are expected for specific URL patterns, e.g. {"pattern":"/admin/*","status":401}.
+  expectedResponses     Json     @default("[]")
+  sslWarningDays        Int[]    @default([30, 15, 7, 3])
+  pageSpeedEnabled      Boolean  @default(false)
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @db.Timestamptz(3)
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+}
+
+model DiscoveredUrl {
+  id                 String    @id @default(cuid())
+  websiteId          String
+  url                String
+  normalizedUrl      String
+  source             UrlSource
+  depth              Int       @default(0)
+  inSitemap          Boolean   @default(false)
+  isManual           Boolean   @default(false)
+  isActive           Boolean   @default(true)
+  canonicalUrl       String?
+  contentType        String?
+  lastStatusCode     Int?
+  lastAvailability   Availability?
+  lastResponseTimeMs Int?
+  firstSeenAt        DateTime  @default(now()) @db.Timestamptz(3)
+  lastSeenAt         DateTime  @default(now()) @db.Timestamptz(3)
+  lastCheckedAt      DateTime? @db.Timestamptz(3)
+
+  website            Website             @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  crawlResults       CrawlResult[]
+  seoAuditResults    SeoAuditResult[]
+  performanceResults PerformanceResult[]
+
+  @@unique([websiteId, normalizedUrl])
+  @@index([websiteId, isActive])
+  @@index([websiteId, lastStatusCode])
+  @@index([websiteId, lastCheckedAt])
+}
+
+// ──────────────────────── Monitoring runs ────────────────────────
+
+model MonitoringRun {
+  id              String     @id @default(cuid())
+  number          Int        @unique @default(autoincrement())
+  websiteId       String
+  trigger         RunTrigger
+  scanType        ScanType   @default(FULL)
+  status          RunStatus  @default(QUEUED)
+  startedAt       DateTime?  @db.Timestamptz(3)
+  finishedAt      DateTime?  @db.Timestamptz(3)
+  durationMs      Int?
+  heartbeatAt     DateTime?  @db.Timestamptz(3)
+  urlsChecked     Int        @default(0)
+  newUrls         Int        @default(0)
+  newIssues       Int        @default(0)
+  updatedIssues   Int        @default(0)
+  resolvedIssues  Int        @default(0)
+  failedChecks    Int        @default(0)
+  errorMessage    String?
+  summary         Json?
+  triggeredById   String?
+  createdAt       DateTime   @default(now()) @db.Timestamptz(3)
+
+  website            Website             @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  jobs               MonitoringJob[]
+  crawlRuns          CrawlRun[]
+  issueOccurrences   IssueOccurrence[]
+  apiCheckResults    ApiCheckResult[]
+  seoAuditResults    SeoAuditResult[]
+  performanceResults PerformanceResult[]
+  sslChecks          SslCheck[]
+
+  @@index([websiteId, createdAt])
+  @@index([status])
+}
+
+/// One row per website while a run holds it. Prevents overlapping runs;
+/// an expired lease can be taken over so crashed runs are resumable.
+model MonitoringLock {
+  websiteId       String   @id
+  monitoringRunId String
+  leaseUntil      DateTime @db.Timestamptz(3)
+  acquiredAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+}
+
+/// A resumable unit of work inside a run (a stage, processed in batches).
+model MonitoringJob {
+  id              String    @id @default(cuid())
+  monitoringRunId String
+  stage           JobStage
+  status          JobStatus @default(PENDING)
+  cursor          Json?
+  processed       Int       @default(0)
+  total           Int?
+  attempts        Int       @default(0)
+  errorMessage    String?
+  startedAt       DateTime? @db.Timestamptz(3)
+  finishedAt      DateTime? @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
+
+  monitoringRun MonitoringRun @relation(fields: [monitoringRunId], references: [id], onDelete: Cascade)
+
+  @@unique([monitoringRunId, stage])
+  @@index([status])
+}
+
+model CrawlRun {
+  id              String    @id @default(cuid())
+  websiteId       String
+  monitoringRunId String?
+  status          RunStatus @default(QUEUED)
+  urlsQueued      Int       @default(0)
+  urlsCrawled     Int       @default(0)
+  urlsFailed      Int       @default(0)
+  startedAt       DateTime? @db.Timestamptz(3)
+  finishedAt      DateTime? @db.Timestamptz(3)
+
+  website       Website        @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  monitoringRun MonitoringRun? @relation(fields: [monitoringRunId], references: [id], onDelete: SetNull)
+  results       CrawlResult[]
+
+  @@index([websiteId, startedAt])
+}
+
+model CrawlResult {
+  id              String       @id @default(cuid())
+  crawlRunId      String
+  discoveredUrlId String
+  url             String
+  statusCode      Int?
+  availability    Availability
+  responseTimeMs  Int?
+  redirectUrl     String?
+  finalUrl        String?
+  contentType     String?
+  contentLength   Int?
+  errorMessage    String?
+  checkedAt       DateTime     @default(now()) @db.Timestamptz(3)
+
+  crawlRun      CrawlRun      @relation(fields: [crawlRunId], references: [id], onDelete: Cascade)
+  discoveredUrl DiscoveredUrl @relation(fields: [discoveredUrlId], references: [id], onDelete: Cascade)
+
+  @@index([crawlRunId])
+  @@index([discoveredUrlId, checkedAt])
+  @@index([availability])
+}
+
+// ──────────────────────────── Issues ────────────────────────────
+
+model Issue {
+  id               String        @id @default(cuid())
+  /// Human-friendly sequential ID, shown as EM-<number>.
+  number           Int           @unique @default(autoincrement())
+  websiteId        String
+  category         IssueCategory
+  /// Machine type from the issue catalogue, e.g. "seo.missing_title".
+  type             String
+  /// Stable hash of type + affected resource. Re-detections update this row.
+  fingerprint      String
+  title            String
+  description      String
+  affectedUrl      String?
+  sourceUrl        String?
+  httpStatus       Int?
+  severity         Severity
+  status           IssueStatus   @default(NEW)
+  details          Json?
+  firstDetectedAt  DateTime      @default(now()) @db.Timestamptz(3)
+  lastDetectedAt   DateTime      @default(now()) @db.Timestamptz(3)
+  occurrenceCount  Int           @default(1)
+  recurrenceCount  Int           @default(0)
+  resolvedAt       DateTime?     @db.Timestamptz(3)
+  lastNotifiedAt   DateTime?     @db.Timestamptz(3)
+  assigneeId       String?
+  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime      @updatedAt @db.Timestamptz(3)
+
+  website       Website           @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  assignee      User?             @relation("IssueAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  occurrences   IssueOccurrence[]
+  notifications Notification[]
+
+  @@unique([websiteId, fingerprint])
+  @@index([websiteId, status])
+  @@index([websiteId, severity])
+  @@index([websiteId, category])
+  @@index([websiteId, lastDetectedAt])
+  @@index([affectedUrl])
+}
+
+/// Audit trail of everything that happened to an issue.
+model IssueOccurrence {
+  id              String         @id @default(cuid())
+  issueId         String
+  monitoringRunId String?
+  kind            OccurrenceKind
+  fromStatus      IssueStatus?
+  toStatus        IssueStatus?
+  note            String?
+  details         Json?
+  actorId         String?
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+
+  issue         Issue          @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  monitoringRun MonitoringRun? @relation(fields: [monitoringRunId], references: [id], onDelete: SetNull)
+  actor         User?          @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([issueId, createdAt])
+}
+
+// ───────────────────────── API monitoring ─────────────────────────
+
+model ApiEndpoint {
+  id                String      @id @default(cuid())
+  websiteId         String
+  name              String
+  url               String
+  method            HttpMethod  @default(GET)
+  /// Non-secret headers only. Secrets live in encryptedAuth.
+  headers           Json        @default("{}")
+  authType          ApiAuthType @default(NONE)
+  /// AES-256-GCM ciphertext of the credential. Never returned to the browser.
+  encryptedAuth     String?
+  requestBody       String?
+  expectedStatus    Int         @default(200)
+  expectedFields    String[]    @default([])
+  timeoutMs         Int         @default(10000)
+  frequencyMinutes  Int         @default(240)
+  isActive          Boolean     @default(true)
+  lastCheckedAt     DateTime?   @db.Timestamptz(3)
+  createdAt         DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime    @updatedAt @db.Timestamptz(3)
+
+  website Website          @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  results ApiCheckResult[]
+
+  @@index([websiteId, isActive])
+}
+
+model ApiCheckResult {
+  id              String   @id @default(cuid())
+  apiEndpointId   String
+  monitoringRunId String?
+  ok              Boolean
+  statusCode      Int?
+  responseTimeMs  Int?
+  errorType       String?
+  errorMessage    String?
+  missingFields   String[] @default([])
+  checkedAt       DateTime @default(now()) @db.Timestamptz(3)
+
+  apiEndpoint   ApiEndpoint    @relation(fields: [apiEndpointId], references: [id], onDelete: Cascade)
+  monitoringRun MonitoringRun? @relation(fields: [monitoringRunId], references: [id], onDelete: SetNull)
+
+  @@index([apiEndpointId, checkedAt])
+  @@index([ok, checkedAt])
+}
+
+// ─────────────────────── Redirects & SEO ───────────────────────
+
+model Redirect {
+  id               String   @id @default(cuid())
+  websiteId        String
+  sourceUrl        String
+  destinationUrl   String
+  finalUrl         String?
+  statusCode       Int
+  hops             Int      @default(1)
+  chain            Json     @default("[]")
+  finalStatusCode  Int?
+  isLoop           Boolean  @default(false)
+  isHttpToHttps    Boolean  @default(false)
+  firstSeenAt      DateTime @default(now()) @db.Timestamptz(3)
+  lastSeenAt       DateTime @default(now()) @db.Timestamptz(3)
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, sourceUrl])
+  @@index([websiteId, hops])
+}
+
+model SeoAuditResult {
+  id                    String   @id @default(cuid())
+  discoveredUrlId       String
+  monitoringRunId       String?
+  title                 String?
+  titleLength           Int?
+  metaDescription       String?
+  metaDescriptionLength Int?
+  h1Count               Int      @default(0)
+  headings              Json?
+  canonicalUrl          String?
+  robotsMeta            String?
+  xRobotsTag            String?
+  isIndexable           Boolean  @default(true)
+  ogTitle               String?
+  ogDescription         String?
+  ogImage               String?
+  twitterCard           String?
+  schemaTypes           String[] @default([])
+  jsonLdValid           Boolean  @default(true)
+  checkedAt             DateTime @default(now()) @db.Timestamptz(3)
+
+  discoveredUrl DiscoveredUrl  @relation(fields: [discoveredUrlId], references: [id], onDelete: Cascade)
+  monitoringRun MonitoringRun? @relation(fields: [monitoringRunId], references: [id], onDelete: SetNull)
+
+  @@index([discoveredUrlId, checkedAt])
+  @@index([title])
+  @@index([metaDescription])
+}
+
+// ───────────────────── Performance, SSL, sitemap ─────────────────────
+
+model PerformanceResult {
+  id              String            @id @default(cuid())
+  websiteId       String
+  discoveredUrlId String?
+  monitoringRunId String?
+  url             String
+  source          PerformanceSource
+  dnsMs           Int?
+  connectMs       Int?
+  tlsMs           Int?
+  ttfbMs          Int?
+  totalMs         Int?
+  htmlBytes       Int?
+  lcpMs           Int?
+  fcpMs           Int?
+  cls             Float?
+  inpMs           Int?
+  performanceScore   Int?
+  accessibilityScore Int?
+  bestPracticesScore Int?
+  seoScore           Int?
+  checkedAt       DateTime          @default(now()) @db.Timestamptz(3)
+
+  website       Website        @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  discoveredUrl DiscoveredUrl? @relation(fields: [discoveredUrlId], references: [id], onDelete: SetNull)
+  monitoringRun MonitoringRun? @relation(fields: [monitoringRunId], references: [id], onDelete: SetNull)
+
+  @@index([websiteId, checkedAt])
+  @@index([discoveredUrlId, checkedAt])
+}
+
+model SslCheck {
+  id              String    @id @default(cuid())
+  websiteId       String
+  monitoringRunId String?
+  hostname        String
+  valid           Boolean
+  issuer          String?
+  subject         String?
+  validFrom       DateTime? @db.Timestamptz(3)
+  validTo         DateTime? @db.Timestamptz(3)
+  daysRemaining   Int?
+  dnsAddresses    String[]  @default([])
+  errorMessage    String?
+  checkedAt       DateTime  @default(now()) @db.Timestamptz(3)
+
+  website       Website        @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  monitoringRun MonitoringRun? @relation(fields: [monitoringRunId], references: [id], onDelete: SetNull)
+
+  @@index([websiteId, checkedAt])
+}
+
+model Sitemap {
+  id             String    @id @default(cuid())
+  websiteId      String
+  url            String
+  isIndex        Boolean   @default(false)
+  parentId       String?
+  urlCount       Int       @default(0)
+  lastStatusCode Int?
+  isValid        Boolean   @default(true)
+  errorMessage   String?
+  lastFetchedAt  DateTime? @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+
+  website  Website   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  parent   Sitemap?  @relation("SitemapTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Sitemap[] @relation("SitemapTree")
+
+  @@unique([websiteId, url])
+}
+
+// ───────────────────────── Notifications ─────────────────────────
+
+model NotificationPreference {
+  id        String              @id @default(cuid())
+  websiteId String
+  userId    String?
+  channel   NotificationChannel
+  /// Email address for EMAIL. For SLACK the webhook URL is encrypted instead.
+  target    String?
+  encryptedTarget String?
+  events    NotificationEvent[]
+  isEnabled Boolean             @default(true)
+  createdAt DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime            @updatedAt @db.Timestamptz(3)
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([websiteId, isEnabled])
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  websiteId String
+  issueId   String?
+  channel   NotificationChannel
+  event     NotificationEvent
+  status    NotificationStatus  @default(PENDING)
+  payload   Json
+  error     String?
+  sentAt    DateTime?           @db.Timestamptz(3)
+  createdAt DateTime            @default(now()) @db.Timestamptz(3)
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  issue   Issue?  @relation(fields: [issueId], references: [id], onDelete: SetNull)
+
+  @@index([websiteId, createdAt])
+  @@index([issueId, event])
+}
+
+// ─────────────────────────── Audit log ───────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  ipHash     String?
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+}
